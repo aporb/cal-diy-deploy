@@ -1,0 +1,62 @@
+name: Build cal.diy image
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "cal.diy git tag to build"
+        required: true
+        default: "v6.2.0"
+      webapp_url:
+        description: "Public base URL baked into the image"
+        required: true
+        default: "https://book.harborgovcon.com"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/aporb/cal-diy
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out deploy repo
+        uses: actions/checkout@v4
+
+      - name: Check out cal.diy source
+        uses: actions/checkout@v4
+        with:
+          repository: calcom/cal.diy
+          ref: ${{ inputs.tag || github.ref_name }}
+          path: src
+
+      - name: Patch build config (skip type-checking to fit the 8 GB private runner)
+        run: python3 scripts/patch-next-config.py src/apps/web/next.config.ts
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: src
+          file: src/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ inputs.tag || github.ref_name }}
+            ${{ env.IMAGE }}:latest
+          build-args: |
+            NEXT_PUBLIC_WEBAPP_URL=${{ inputs.webapp_url || 'https://book.harborgovcon.com' }}
+            MAX_OLD_SPACE_SIZE=4096
+            CALCOM_TELEMETRY_DISABLED=1

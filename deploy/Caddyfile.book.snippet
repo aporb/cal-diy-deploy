@@ -1,0 +1,22 @@
+# --- book.harborgovcon.com : cal.diy scheduling (HARBOR GovCon) -------------
+# DNS: A book.harborgovcon.com -> 2.24.107.44 (Vercel DNS, overrides zone wildcard).
+# Backend: /opt/cal-diy docker compose, loopback-only 127.0.0.1:3005.
+# ACME: Let's Encrypt HTTP-01 (port 80 open). Apply with: caddy validate, caddy reload.
+book.harborgovcon.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:3005 {
+		header_up Host {host}
+		header_up X-Real-IP {remote}
+		header_up X-Forwarded-For {remote}
+		header_up X-Forwarded-Proto https
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+	log {
+		output file /var/log/caddy/book-harborgovcon.access.log
+	}
+}

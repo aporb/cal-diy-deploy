@@ -1,0 +1,40 @@
+services:
+  database:
+    image: postgres:15-alpine
+    container_name: cal-diy-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    networks: [stack]
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  redis:
+    image: redis:7-alpine
+    container_name: cal-diy-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1"]
+    networks: [stack]
+    mem_limit: 192m
+  calcom:
+    image: ghcr.io/aporb/cal-diy:v6.2.0
+    container_name: cal-diy
+    restart: unless-stopped
+    depends_on:
+      database:
+        condition: service_healthy
+    env_file: .env
+    ports:
+      - "127.0.0.1:3005:3000"
+    networks: [stack]
+    mem_limit: 2g
+networks:
+  stack:
+    name: cal-diy
