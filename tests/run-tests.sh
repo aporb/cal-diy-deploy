@@ -15,6 +15,28 @@ if [ ! -d "$ROOT" ]; then
   exit 2
 fi
 
+# node_modules is gitignored, so a fresh clone will not have it. Install on demand rather
+# than failing later with a MODULE_NOT_FOUND that looks like a code problem.
+if [ ! -x "$HERE/node_modules/typescript/bin/tsc" ]; then
+  echo "test dependencies missing -- installing (typescript, dayjs)..."
+  # Two known environment hazards, both handled:
+  #  - a half-written node_modules from an interrupted install makes npm fail with
+  #    ENOTEMPTY on rename, so start from a clean directory
+  #  - a root-owned ~/.npm cache makes npm fail with EPERM even for a normal user, so
+  #    retry against a private cache in the system temp dir
+  rm -rf "$HERE/node_modules"
+  if ! (cd "$HERE" && npm install --no-audit --no-fund >/dev/null 2>&1); then
+    echo "  default npm cache unusable; retrying with a temporary cache..."
+    rm -rf "$HERE/node_modules"
+    if ! (cd "$HERE" && npm_config_cache="$(mktemp -d)" npm install --no-audit --no-fund >/dev/null 2>&1); then
+      echo "npm install failed. run it by hand:  cd \"$HERE\" && npm install"
+      exit 2
+    fi
+  fi
+  echo "dependencies installed."
+  echo
+fi
+
 echo "Testing patched source: $ROOT"
 echo
 

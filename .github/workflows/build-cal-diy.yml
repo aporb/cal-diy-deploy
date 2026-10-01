@@ -11,6 +11,7 @@ name: Build cal.diy image
 #                                and alert the operator when that means there is no join link
 #   patch-reminder-template.py   stop reminder emails printing the literal word "undefined"
 #   patch-branding.py            HARBOR instead of Cal.com in the tab title and mail sender
+#   patch-icons.py               HARBOR favicon/app icons instead of Cal.com's stock marks
 #
 # Each patch re-derives its anchors from the pinned source and fails the build loudly if
 # upstream moved the code, rather than mis-patching it silently.
@@ -62,7 +63,9 @@ jobs:
           path: src
 
       - name: Make patch assets available to the patch scripts
-        run: cp -r patch-assets src/patch-assets
+        run: |
+          cp -r patch-assets src/patch-assets
+          cp -r assets src/assets
 
       - name: Patch build config (skip type-checking to fit the runner)
         run: python3 scripts/patch-next-config.py src/apps/web/next.config.ts
@@ -79,6 +82,9 @@ jobs:
       - name: Patch branding (Layer 5)
         run: python3 scripts/patch-branding.py src
 
+      - name: Patch app icons (Layer 5)
+        run: python3 scripts/patch-icons.py src
+
       - name: Show exactly what changed
         run: |
           echo "=== files added by patches ==="
@@ -89,6 +95,12 @@ jobs:
           echo
           echo "=== branding args in Dockerfile ==="
           grep -n "APP_NAME\|EMAIL_FROM_NAME" src/Dockerfile || true
+          echo
+          echo "=== app icons replaced (should be HARBOR, never Cal.com) ==="
+          grep -o 'aria-label="[^"]*"' src/apps/web/public/calcom-logo-white-word.svg || true
+          grep -o 'aria-label="[^"]*"' src/apps/web/public/cal-com-icon-white.svg || true
+          echo -n "cal.com mentions in wordmark: "
+          grep -ci "cal.com" src/apps/web/public/calcom-logo-white-word.svg || echo 0
           echo
           echo "=== no unguarded meetingUrl interpolation remains ==="
           grep -c 'label || location} ${meetingUrl}' src/packages/features/ee/workflows/lib/reminders/templates/emailReminderTemplate.ts || true
@@ -128,7 +140,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| Source | \`calcom/cal.diy@${{ inputs.source_ref }}\` |"
-            echo "| Patches | retry, email+alert, reminder template, branding |"
+            echo "| Patches | retry, email+alert, reminder template, branding, icons |"
             echo "| Brand | \`${{ inputs.app_name }}\` |"
             echo
             echo "Deploy on porb-dev:"
