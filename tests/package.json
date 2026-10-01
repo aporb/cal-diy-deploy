@@ -1,0 +1,13 @@
+{
+  "name": "cal-diy-deploy-patch-tests",
+  "private": true,
+  "type": "module",
+  "description": "Behavioural tests for the cal.diy build-time patches",
+  "scripts": {
+    "test": "bash run-tests.sh"
+  },
+  "dependencies": {
+    "dayjs": "^1.11.13",
+    "typescript": "^5.6.0"
+  }
+}
