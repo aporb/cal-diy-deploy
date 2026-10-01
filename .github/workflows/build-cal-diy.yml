@@ -1,16 +1,44 @@
 name: Build cal.diy image
 
+# Builds the HARBOR-hardened cal.diy image and publishes it to GHCR.
+#
+# The image is NOT plain upstream cal.diy. Four build-time patches are applied to the
+# pinned upstream source before the Docker build:
+#
+#   patch-next-config.py      skip type-checking so the build fits the runner
+#   patch-calendar-retry.py   retry transient calendar failures (403 rate-limit, 429, 5xx)
+#   patch-booking-email-send.py  send the confirmation even when the calendar write failed,
+#                                and alert the operator when that means there is no join link
+#   patch-reminder-template.py   stop reminder emails printing the literal word "undefined"
+#   patch-branding.py            HARBOR instead of Cal.com in the tab title and mail sender
+#
+# Each patch re-derives its anchors from the pinned source and fails the build loudly if
+# upstream moved the code, rather than mis-patching it silently.
+
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: "cal.diy git tag to build"
+      source_ref:
+        description: "Upstream cal.diy git tag or ref to build FROM"
         required: true
         default: "v6.2.0"
+      build_tag:
+        description: "Image tag to publish (must differ from source_ref for a patched build)"
+        required: true
+        default: "v6.2.0-harbor1"
       webapp_url:
         description: "Public base URL baked into the image"
         required: true
         default: "https://book.harborgovcon.com"
+      app_name:
+        description: "Public brand name (browser tab suffix, APP_NAME)"
+        required: true
+        default: "HARBOR"
+      push_latest:
+        description: "Also tag this build as :latest"
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -30,11 +58,40 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: calcom/cal.diy
-          ref: ${{ inputs.tag || github.ref_name }}
+          ref: ${{ inputs.source_ref }}
           path: src
 
-      - name: Patch build config (skip type-checking to fit the 8 GB private runner)
+      - name: Make patch assets available to the patch scripts
+        run: cp -r patch-assets src/patch-assets
+
+      - name: Patch build config (skip type-checking to fit the runner)
         run: python3 scripts/patch-next-config.py src/apps/web/next.config.ts
+
+      - name: Patch calendar retry (Layer 1)
+        run: python3 scripts/patch-calendar-retry.py src
+
+      - name: Patch booking confirmation email (Layers 2 and 4)
+        run: python3 scripts/patch-booking-email-send.py src
+
+      - name: Patch reminder template (Layer 3)
+        run: python3 scripts/patch-reminder-template.py src
+
+      - name: Patch branding (Layer 5)
+        run: python3 scripts/patch-branding.py src
+
+      - name: Show exactly what changed
+        run: |
+          echo "=== files added by patches ==="
+          find src/packages/features/bookings/lib/harbor -type f 2>/dev/null || true
+          echo
+          echo "=== import rewritten in EventManager.ts ==="
+          grep -n "createEventWithRetry" src/packages/features/bookings/lib/EventManager.ts || true
+          echo
+          echo "=== branding args in Dockerfile ==="
+          grep -n "APP_NAME\|EMAIL_FROM_NAME" src/Dockerfile || true
+          echo
+          echo "=== no unguarded meetingUrl interpolation remains ==="
+          grep -c 'label || location} ${meetingUrl}' src/packages/features/ee/workflows/lib/reminders/templates/emailReminderTemplate.ts || true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -54,9 +111,32 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.IMAGE }}:${{ inputs.tag || github.ref_name }}
-            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ inputs.build_tag }}
+            ${{ inputs.push_latest && format('{0}:latest', env.IMAGE) || '' }}
           build-args: |
-            NEXT_PUBLIC_WEBAPP_URL=${{ inputs.webapp_url || 'https://book.harborgovcon.com' }}
+            NEXT_PUBLIC_WEBAPP_URL=${{ inputs.webapp_url }}
+            NEXT_PUBLIC_APP_NAME=${{ inputs.app_name }}
+            EMAIL_FROM_NAME=${{ inputs.app_name }}
             MAX_OLD_SPACE_SIZE=4096
             CALCOM_TELEMETRY_DISABLED=1
+
+      - name: Summary
+        run: |
+          {
+            echo "### Built \`${IMAGE}:${{ inputs.build_tag }}\`"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Source | \`calcom/cal.diy@${{ inputs.source_ref }}\` |"
+            echo "| Patches | retry, email+alert, reminder template, branding |"
+            echo "| Brand | \`${{ inputs.app_name }}\` |"
+            echo
+            echo "Deploy on porb-dev:"
+            echo '```'
+            echo "cd /opt/cal-diy"
+            echo "sed -i 's|cal-diy:.*|cal-diy:${{ inputs.build_tag }}|' docker-compose.yml"
+            echo "docker compose pull && docker compose up -d"
+            echo '```'
+            echo
+            echo "Rollback is \`ghcr.io/aporb/cal-diy:v6.2.0\` -- the previous tag is untouched."
+          } >> "$GITHUB_STEP_SUMMARY"
