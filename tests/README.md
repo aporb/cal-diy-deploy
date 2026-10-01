@@ -14,7 +14,7 @@ parse check would have missed:
 
 ## Requirements
 
-    npm install typescript dayjs
+    npm install
 
 `typescript` transpiles the patched source; `dayjs` is a real dependency of the reminder
 template, so that suite renders genuine output.
@@ -34,6 +34,7 @@ template, so that suite renders genuine output.
 
 | Suite | Asserts |
 |---|---|
+| `typecheck-patched.sh` | The patched helpers compile under an **ES5** target with `strict`. This mirrors `yarn workspace @calcom/trpc run build`, which is what the image build runs — and the only thing that type-checks patched code, since the web build skips type-checking |
 | `verify-ast.mjs` | Every patched file parses. The email send is **not** nested in an `else`. The alert is wired in. `EventManager` routes `createEvent` through the retry wrapper. The unguarded `${meetingUrl}` interpolation is gone |
 | `test-retry.mjs` | The policy table: 403+rate-limit-reason, 429, 500/502/503/504 and network errors retry; bare 403, 401, 400, 404 do not. Measured behaviour: transient → 4 attempts over ~7s, permanent → 1 attempt and 0ms. Success path is untouched and logs nothing |
 | `test-reminder.mjs` | With `meetingUrl` undefined the rendered email contains **no** "undefined" and no "Google Meet undefined", still names the location, and includes the link when one exists. Editing-mode preview does not print a placeholder artifact |

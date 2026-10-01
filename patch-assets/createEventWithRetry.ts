@@ -102,8 +102,10 @@ function sleep(ms: number): Promise<void> {
 export async function createEventWithRetry(
   credential: Parameters<typeof createEventOriginal>[0],
   event: Parameters<typeof createEventOriginal>[1],
-  externalId?: Parameters<typeof createEventOriginal>[2]
-): ReturnType<typeof createEventOriginal> {
+  externalId?: Parameters<typeof createEventOriginal>[2],
+  // Awaited<> is required: the trpc package compiles this file with an ES5 target, where a
+  // bare `ReturnType` of an async function is not a valid async return type (TS1055).
+): Promise<Awaited<ReturnType<typeof createEventOriginal>>> {
   for (let attempt = 1; ; attempt++) {
     try {
       return await createEventOriginal(credential, event, externalId);

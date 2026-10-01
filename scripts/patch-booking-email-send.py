@@ -112,7 +112,9 @@ PATCHED = """  // HARBOR PATCH: never swallow the confirmation email. Upstream g
       message: "Booking failed",
     };
 
-    calendarErrorText = safeStringify({ error, results });
+    // safeStringify returns `unknown` by design (its catch branch returns the raw object),
+    // so coerce explicitly rather than assume a string.
+    calendarErrorText = String(safeStringify({ error, results }));
     tracingLogger.error(`Booking ${user.username} failed`, calendarErrorText);
   }
 
@@ -161,7 +163,8 @@ PATCHED = """  // HARBOR PATCH: never swallow the confirmation email. Upstream g
           bookingUid: booking.uid,
           eventTitle: evt.title,
           attendeeEmails: (evt.attendees || []).map((attendee) => attendee.email),
-          organizerEmail: user.email,
+          // EventManagerUser has no `email` field -- the CalendarEvent organizer does.
+          organizerEmail: evt.organizer?.email || "",
           startTime: evt.startTime,
           calendarError: calendarErrorText || "no join link was produced",
         });

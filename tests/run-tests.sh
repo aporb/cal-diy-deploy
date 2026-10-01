@@ -19,6 +19,19 @@ echo "Testing patched source: $ROOT"
 echo
 
 failed=0
+# Type-check first: the image build runs `yarn workspace @calcom/trpc run build`, which
+# type-checks these files with an ES5 target. A type error there fails the whole build.
+echo "==================================================================="
+echo "  typecheck-patched.sh  (ES5 target, matches the trpc build)"
+echo "==================================================================="
+if bash "$HERE/typecheck-patched.sh" "$ROOT"; then
+  echo "  -> typecheck PASSED"
+else
+  echo "  -> typecheck FAILED"
+  failed=$((failed + 1))
+fi
+echo
+
 for suite in verify-ast.mjs test-retry.mjs test-reminder.mjs test-alert.mjs; do
   echo "==================================================================="
   echo "  $suite"
