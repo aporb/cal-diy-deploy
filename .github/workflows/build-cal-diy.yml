@@ -2,16 +2,24 @@ name: Build cal.diy image
 
 # Builds the HARBOR-hardened cal.diy image and publishes it to GHCR.
 #
-# The image is NOT plain upstream cal.diy. Four build-time patches are applied to the
+# The image is NOT plain upstream cal.diy. Seven build-time patches are applied to the
 # pinned upstream source before the Docker build:
 #
 #   patch-next-config.py      skip type-checking so the build fits the runner
-#   patch-calendar-retry.py   retry transient calendar failures (403 rate-limit, 429, 5xx)
-#   patch-booking-email-send.py  send the confirmation even when the calendar write failed,
-#                                and alert the operator when that means there is no join link
+#   patch-calendar-http-retry.py  retry transient Google Calendar writes at the HTTP layer
+#                                 (PATCH + 403 rate-limit, 429, 5xx). POST is never retried.
+#   patch-booking-email-send-regular.py  the LIVE booking path: send the confirmation even
+#                                 when the calendar write failed (RegularBookingService.ts)
+#   patch-booking-email-send.py  the same fix for the request/confirm path
+#                                 (handleConfirmation.ts)
 #   patch-reminder-template.py   stop reminder emails printing the literal word "undefined"
 #   patch-branding.py            HARBOR instead of Cal.com in the tab title and mail sender
 #   patch-icons.py               HARBOR favicon/app icons instead of Cal.com's stock marks
+#
+# NOTE: patch-calendar-retry.py (which wrapped the whole createEvent call in EventManager) was
+# REMOVED on 2026-10-02. Retrying at that level re-sends events.insert, which is not idempotent
+# and can create a duplicate event plus a duplicate Meet link. HTTP-level retry only re-sends
+# the individual failed request, which is safe.
 #
 # Each patch re-derives its anchors from the pinned source and fails the build loudly if
 # upstream moved the code, rather than mis-patching it silently.
@@ -70,10 +78,13 @@ jobs:
       - name: Patch build config (skip type-checking to fit the runner)
         run: python3 scripts/patch-next-config.py src/apps/web/next.config.ts
 
-      - name: Patch calendar retry (Layer 1)
-        run: python3 scripts/patch-calendar-retry.py src
+      - name: Patch calendar HTTP retry (Layer 1, replaces the old createEvent wrapper)
+        run: python3 scripts/patch-calendar-http-retry.py src
 
-      - name: Patch booking confirmation email (Layers 2 and 4)
+      - name: Patch booking confirmation email, live booking path (Layers 2 and 4)
+        run: python3 scripts/patch-booking-email-send-regular.py src
+
+      - name: Patch booking confirmation email, request/confirm path (Layers 2 and 4)
         run: python3 scripts/patch-booking-email-send.py src
 
       - name: Patch reminder template (Layer 3)
@@ -90,8 +101,14 @@ jobs:
           echo "=== files added by patches ==="
           find src/packages/features/bookings/lib/harbor -type f 2>/dev/null || true
           echo
-          echo "=== import rewritten in EventManager.ts ==="
-          grep -n "createEventWithRetry" src/packages/features/bookings/lib/EventManager.ts || true
+          echo "=== email sends lifted out of the calendar else-branch ==="
+          grep -c "never swallow the booking confirmation email" src/packages/features/bookings/lib/service/RegularBookingService.ts || true
+          grep -c "never swallow the confirmation email" src/packages/features/bookings/lib/handleConfirmation.ts || true
+          echo
+          echo "=== calendar retryConfig attached (PATCH yes, POST no) ==="
+          grep -n "httpMethodsToRetry" src/packages/app-store/googlecalendar/lib/CalendarAuth.ts || true
+          echo -n "createEvent wrapper removed (expect 0): "
+          grep -c "createEventWithRetry" src/packages/features/bookings/lib/EventManager.ts || true
           echo
           echo "=== branding args in Dockerfile ==="
           grep -n "APP_NAME\|EMAIL_FROM_NAME" src/Dockerfile || true
@@ -140,7 +157,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| Source | \`calcom/cal.diy@${{ inputs.source_ref }}\` |"
-            echo "| Patches | retry, email+alert, reminder template, branding, icons |"
+            echo "| Patches | HTTP calendar retry, email+alert (both paths), reminder template, branding, icons |"
             echo "| Brand | \`${{ inputs.app_name }}\` |"
             echo
             echo "Deploy on porb-dev:"
